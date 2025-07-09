@@ -1,1 +1,1 @@
-Main libraries used in projects for easy modification and traceability
+Analyzer based on Blue Pill F103 board and LCD 16x2 display for LV battery load testing
