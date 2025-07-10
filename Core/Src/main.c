@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2025 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -24,7 +24,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "LCD_16x2_PARALLEL.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,7 +35,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define LCD_BUFFER_SIZE 32
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -45,12 +46,15 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-FSM_states FSM_RUNNING = START;
+//@brief START,CHOOSE,DISCHARGE,STOP
+FSM_states STATE_MCU = START;
+static char LCD_buffer[LCD_BUFFER_SIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+void DELAY_US(uint16_t TIME_US);
 
 /* USER CODE END PFP */
 
@@ -92,19 +96,63 @@ int main(void)
   MX_TIM3_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
+	if(HAL_TIM_Base_Start_IT(&htim3)!=HAL_OK)
+	{
+		HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
+		Error_Handler();
+	}
+	if(HAL_TIM_Base_Start_IT(&htim4)!=HAL_OK)
+	{
+		HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
+		Error_Handler();
+	}
 
+	LCD_Init();
+	sprintf(LCD_buffer,"Battery analyzer");
+	LCD_SEND_STR(LCD_buffer, 0, 0);
+	sprintf(LCD_buffer,"Initializing");
+	LCD_SEND_STR(LCD_buffer, 0, 1);
+	HAL_Delay(1000);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-	  HAL_GPIO_TogglePin(USER_LED_GPIO_Port, USER_LED_Pin);
-	  HAL_Delay(200);
+	while (1)
+	{
+		HAL_Delay(1000);
+		HAL_GPIO_TogglePin(USER_LED_GPIO_Port, USER_LED_Pin);
+		LCD_SEND_STR(LCD_buffer, 0, 0);
+		switch(STATE_MCU)
+		{
+		case  START:
+		{
+
+			break;
+		}
+		case  CHOOSE:
+		{
+
+			break;
+		}
+		case  DISCHARGE:
+		{
+
+			break;
+		}
+		case  STOP:
+		{
+
+			break;
+		}
+
+		default:
+
+			break;
+		}
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+	}
   /* USER CODE END 3 */
 }
 
@@ -151,6 +199,20 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void DELAY_US(uint16_t TIME_US)
+{
+    uint32_t old_timer_value = TIM3->CNT;
+    uint32_t target_time = (old_timer_value + TIME_US) % (TIM3->ARR + 1);
+
+    if (target_time < old_timer_value)  // Handle timer overflow
+    {
+        while (TIM3->CNT >= old_timer_value);  // Wait for overflow
+    }
+
+    while (TIM3->CNT < target_time);  // Wait until target time is reached
+}
+
+
 
 /* USER CODE END 4 */
 
@@ -161,15 +223,14 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+	/* User can add his own implementation to report the HAL error return state */
+	__disable_irq();
+	while (1)
+	{
+	}
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.
@@ -180,7 +241,7 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
+	/* User can add his own implementation to report the file name and line number,
      ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
