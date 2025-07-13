@@ -66,10 +66,10 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Button_set_Pin Button_plus_Pin Button_minus_Pin */
-  GPIO_InitStruct.Pin = Button_set_Pin|Button_plus_Pin|Button_minus_Pin;
+  /*Configure GPIO pins : Button_mode_Pin Button_add_Pin Button_sub_Pin */
+  GPIO_InitStruct.Pin = Button_mode_Pin|Button_add_Pin|Button_sub_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pins : RS_Pin RW_Pin EN_Pin */

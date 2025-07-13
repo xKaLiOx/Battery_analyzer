@@ -56,10 +56,19 @@ void Error_Handler(void);
 typedef enum
 {
 	START,
-	CHOOSE,
+	SETUP,
 	DISCHARGE,
-	STOP
+	PAUSED,
+	FINISH
 } FSM_states;
+typedef enum
+{
+	SETUP_PARAM_DISCHARGE_CURRENT,
+	SETUP_PARAM_CUTOFF_VOLTAGE,
+
+
+	SETUP_PARAM_COUNT//calculate max enum value for incrementing in callback modes
+} SETUP_set;
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
@@ -67,15 +76,15 @@ typedef enum
 #define USER_LED_GPIO_Port GPIOC
 #define CHARGING_STATE_Pin GPIO_PIN_14
 #define CHARGING_STATE_GPIO_Port GPIOC
-#define Button_set_Pin GPIO_PIN_1
-#define Button_set_GPIO_Port GPIOB
-#define Button_set_EXTI_IRQn EXTI1_IRQn
-#define Button_plus_Pin GPIO_PIN_10
-#define Button_plus_GPIO_Port GPIOB
-#define Button_plus_EXTI_IRQn EXTI15_10_IRQn
-#define Button_minus_Pin GPIO_PIN_11
-#define Button_minus_GPIO_Port GPIOB
-#define Button_minus_EXTI_IRQn EXTI15_10_IRQn
+#define Button_mode_Pin GPIO_PIN_1
+#define Button_mode_GPIO_Port GPIOB
+#define Button_mode_EXTI_IRQn EXTI1_IRQn
+#define Button_add_Pin GPIO_PIN_10
+#define Button_add_GPIO_Port GPIOB
+#define Button_add_EXTI_IRQn EXTI15_10_IRQn
+#define Button_sub_Pin GPIO_PIN_11
+#define Button_sub_GPIO_Port GPIOB
+#define Button_sub_EXTI_IRQn EXTI15_10_IRQn
 #define RS_Pin GPIO_PIN_9
 #define RS_GPIO_Port GPIOA
 #define RW_Pin GPIO_PIN_10
