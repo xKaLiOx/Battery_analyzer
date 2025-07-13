@@ -61,13 +61,18 @@ typedef enum
 	PAUSED,
 	FINISH
 } FSM_states;
+
+/*
+ * 	SETUP_PARAM_DISCHARGE_CURRENT,
+	SETUP_PARAM_CUTOFF_VOLTAGE,
+	SETUP_PARAM_COUNT//calculate max enum value for incrementing in callback modes
+ */
 typedef enum
 {
 	SETUP_PARAM_DISCHARGE_CURRENT,
 	SETUP_PARAM_CUTOFF_VOLTAGE,
 
-
-	SETUP_PARAM_COUNT//calculate max enum value for incrementing in callback modes
+	SETUP_PARAM_COUNT
 } SETUP_set;
 /* USER CODE END EFP */
 

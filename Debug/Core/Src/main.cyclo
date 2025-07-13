@@ -1,6 +1,8 @@
-../Core/Src/main.c:87:5:main	5
-../Core/Src/main.c:192:6:SystemClock_Config	4
-../Core/Src/main.c:231:6:DELAY_US	4
-../Core/Src/main.c:243:6:updateScreen	5
-../Core/Src/main.c:319:6:HAL_GPIO_EXTI_Callback	6
-../Core/Src/main.c:358:6:Error_Handler	1
+../Core/Src/main.c:95:5:main	5
+../Core/Src/main.c:200:6:SystemClock_Config	4
+../Core/Src/main.c:239:6:DELAY_US	4
+../Core/Src/main.c:251:6:updateScreen	5
+../Core/Src/main.c:324:6:formatCharToLCD	7
+../Core/Src/main.c:353:6:charAddPadding	8
+../Core/Src/main.c:393:6:HAL_GPIO_EXTI_Callback	10
+../Core/Src/main.c:446:6:Error_Handler	1
