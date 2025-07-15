@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "dma.h"
 #include "tim.h"
 #include "gpio.h"
 
@@ -46,6 +47,8 @@
 #define Vrefint 1.2 //1.2V internal reference voltage
 #define ADC_steps 4096
 
+
+#define ADC_DMA_SIZE 100 //0.5ms sampling rate, 25 values on half callback, 2 channels, ping pong buffer
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -63,14 +66,17 @@
 	PAUSED,
 	FINISH
  */
-volatile FSM_states STATE_MCU = START;
+volatile FSM_states STATE_MCU_CURRENT = START;
+volatile FSM_states STATE_MCU_PREVIOUS = START;
 volatile SETUP_set SETUP_CONFIGURATION = SETUP_PARAM_DISCHARGE_CURRENT;
 char LCD_buffer[LCD_BUFFER_SIZE];
-float Vdda = 3.3; //ref for measurements, calculated later by ADC with internal ref
+uint16_t ADC_Values[ADC_DMA_SIZE];//ping pong buffer
+volatile float Vdda = 3.3; //ref for measurements, calculated later by ADC with internal ref
 volatile uint8_t updateScreenRequest = 1;//update at setup on first frame
 
 volatile uint16_t Discharge_current = 500;//mA
 volatile float Cutoff_voltage = 2.5;//V
+volatile float ADC_VOLTAGES_MEAN[2] = {0};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -117,32 +123,31 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_TIM4_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 	if(HAL_ADCEx_Calibration_Start(&hadc1) !=HAL_OK)
 	{
 		HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
 		Error_Handler();
 	}
-	if(HAL_TIM_Base_Start_IT(&htim3)!=HAL_OK)
+
+	if(HAL_TIM_Base_Start_IT(&htim2)!=HAL_OK)//TIM2 for DELAY_US
 	{
 		HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
 		Error_Handler();
 	}
-	if(HAL_TIM_Base_Start_IT(&htim4)!=HAL_OK)
-	{
-		HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
-		Error_Handler();
-	}
+
 	HAL_Delay(500);// wait for DC point
 
 	//Read internal reference for VDDA
 	HAL_ADCEx_InjectedStart(&hadc1);
 	HAL_ADCEx_InjectedPollForConversion(&hadc1, 500);
 	uint16_t Vadc = HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
-	Vdda = Vadc/ADC_steps*Vrefint;
+	Vdda = 1.0*ADC_steps/Vadc*Vrefint;
 
 	/*
 	 * @brief Init in 4 bit LCD 16x2
@@ -158,7 +163,7 @@ int main(void)
 			updateScreen();
 		}
 
-		switch(STATE_MCU)
+		switch(STATE_MCU_CURRENT)
 		{
 		case  SETUP:
 		{
@@ -166,7 +171,25 @@ int main(void)
 		}
 		case  DISCHARGE:
 		{
-
+			if(STATE_MCU_CURRENT != STATE_MCU_PREVIOUS)
+			{
+				if(HAL_TIM_Base_Start_IT(&htim3)!=HAL_OK)//TIM3 for SAMPLING
+				{
+					HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
+					Error_Handler();
+				}
+				if(HAL_ADC_Start_DMA(&hadc1, (uint32_t*)ADC_Values, ADC_DMA_SIZE)!=HAL_OK)//ADC SAMPLING DMA
+				{
+					HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
+					Error_Handler();
+				}
+				if(HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1)!=HAL_OK)//TIM4 for MOSFET PWM
+				{
+					HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
+					Error_Handler();
+				}
+				STATE_MCU_PREVIOUS = STATE_MCU_CURRENT;
+			}
 			break;
 		}
 		case  FINISH:
@@ -238,20 +261,20 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 void DELAY_US(uint16_t TIME_US)
 {
-	uint32_t old_timer_value = TIM3->CNT;
-	uint32_t target_time = (old_timer_value + TIME_US) % (TIM3->ARR + 1);
+	uint32_t old_timer_value = TIM2->CNT;
+	uint32_t target_time = (old_timer_value + TIME_US) % (TIM2->ARR + 1);
 
 	if (target_time < old_timer_value)  // Handle timer overflow
 	{
-		while (TIM3->CNT >= old_timer_value);  // Wait for overflow
+		while (TIM2->CNT >= old_timer_value);  // Wait for overflow
 	}
 
-	while (TIM3->CNT < target_time);  // Wait until target time is reached
+	while (TIM2->CNT < target_time);  // Wait until target time is reached
 }
 void updateScreen()
 {
 	updateScreenRequest = 0;
-	switch(STATE_MCU)
+	switch(STATE_MCU_CURRENT)
 	{
 	case  START:
 	{
@@ -264,7 +287,7 @@ void updateScreen()
 		formatCharToLCD(LCD_buffer,0,1,ALIGN_CENTER);
 
 		HAL_Delay(1000);
-		STATE_MCU = SETUP;
+		STATE_MCU_CURRENT = SETUP;
 		break;
 	}
 	case  SETUP:
@@ -272,16 +295,16 @@ void updateScreen()
 		switch(SETUP_CONFIGURATION)
 		{
 		case(SETUP_PARAM_DISCHARGE_CURRENT):
-				{
+					{
 			sprintf(LCD_buffer,"Current, mA");
 			formatCharToLCD(LCD_buffer,0,0,ALIGN_CENTER);
 
 			sprintf(LCD_buffer,"%d",Discharge_current);
 			formatCharToLCD(LCD_buffer,0,1,ALIGN_CENTER);
 			break;
-				}
+					}
 		case(SETUP_PARAM_CUTOFF_VOLTAGE):
-				{
+					{
 			sprintf(LCD_buffer,"Voltage, V");
 			formatCharToLCD(LCD_buffer,0,0,ALIGN_CENTER);
 
@@ -290,7 +313,7 @@ void updateScreen()
 			sprintf(LCD_buffer,"%d.%d",(int)Cutoff_voltage,separator);
 			formatCharToLCD(LCD_buffer,1,1,ALIGN_CENTER);
 			break;
-				}
+					}
 		default:
 			LCD_CLEAR();
 			break;
@@ -393,7 +416,10 @@ void charAddPadding(char* buffer, uint8_t align,uint8_t size)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	//test what button is pressed
-	if(STATE_MCU != SETUP)
+	//IMPLEMENT THE STARTING PROCESS
+	STATE_MCU_CURRENT = DISCHARGE;
+	STATE_MCU_PREVIOUS = SETUP;
+	if(STATE_MCU_CURRENT != SETUP)
 	{
 		return;
 	}
@@ -401,12 +427,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	switch(GPIO_Pin)
 	{
 	case(Button_mode_Pin):
-		{
+			{
 		SETUP_CONFIGURATION = 	(SETUP_CONFIGURATION+1)%SETUP_PARAM_COUNT;
 		break;
-		}
+			}
 	case(Button_add_Pin):
-				{
+					{
 		if(SETUP_CONFIGURATION == SETUP_PARAM_CUTOFF_VOLTAGE)
 		{
 			Cutoff_voltage += 0.05;// 50 mV step
@@ -416,9 +442,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			Discharge_current+=10;// 10 mA step
 		}
 		break;
-				}
+					}
 	case(Button_sub_Pin):
-		{
+			{
 		if(SETUP_CONFIGURATION == SETUP_PARAM_CUTOFF_VOLTAGE)
 		{
 			Cutoff_voltage -= 0.05;// 50 mV step
@@ -428,7 +454,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			Discharge_current-=10;// 10 mA step
 		}
 		break;
-		}
+			}
 	default:
 	{
 
@@ -436,6 +462,34 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	}
 	}
 }
+
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc)
+{
+	uint32_t adc_sum[2] = {0};
+
+	for(uint16_t i = 0; i < (ADC_DMA_SIZE/2)-1; i=i+2)
+	{
+		adc_sum[0] += ADC_Values[i];//first channel
+		adc_sum[1] += ADC_Values[i+1];//second channel
+	}
+
+	ADC_VOLTAGES_MEAN[0] = 4.0*(float)adc_sum[0]/ADC_DMA_SIZE;
+	ADC_VOLTAGES_MEAN[1] = 4.0*(float)adc_sum[1]/(ADC_DMA_SIZE);
+}
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+	uint32_t adc_sum[2] = {0};
+
+	for(uint16_t i = (ADC_DMA_SIZE/2); i < ADC_DMA_SIZE; i=i+2)
+	{
+		adc_sum[0] += ADC_Values[i];//first channel
+		adc_sum[1] += ADC_Values[i+1];//second channel
+	}
+	ADC_VOLTAGES_MEAN[0] = 4.0*(float)adc_sum[0]/ADC_DMA_SIZE;
+	ADC_VOLTAGES_MEAN[1] = 4.0*(float)adc_sum[1]/(ADC_DMA_SIZE);
+}
+
 
 /* USER CODE END 4 */
 
