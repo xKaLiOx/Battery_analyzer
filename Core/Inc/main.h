@@ -74,6 +74,16 @@ typedef enum
 
 	SETUP_PARAM_COUNT
 } SETUP_set;
+
+/*
+ * @brief Parameters for discharge FSM value display
+ */
+typedef struct {
+    float voltage;
+    float current_ma;
+    float capacity_mah;
+    uint32_t elapsed_time_sec;
+} DischargeDisplayData_t;
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/

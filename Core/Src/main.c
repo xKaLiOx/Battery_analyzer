@@ -49,6 +49,10 @@
 
 
 #define ADC_DMA_SIZE 100 //0.5ms sampling rate, 25 values on half callback, 2 channels, ping pong buffer
+#define ADC_TRIGGER_FREQ_HZ 2000 //counter update rate
+#define ADC_SAMPLES_PER_CHANNEL 25
+#define TIME_SLICE_S ADC_SAMPLES_PER_CHANNEL/ADC_TRIGGER_FREQ_HZ
+#define MAH_CONVERSION (TIME_SLICE_S/3600.0f)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -69,29 +73,42 @@
 volatile FSM_states STATE_MCU_CURRENT = START;
 volatile FSM_states STATE_MCU_PREVIOUS = START;
 volatile SETUP_set SETUP_CONFIGURATION = SETUP_PARAM_DISCHARGE_CURRENT;
+
 char LCD_buffer[LCD_BUFFER_SIZE];
 uint16_t ADC_Values[ADC_DMA_SIZE];//ping pong buffer
+
 volatile float Vdda = 3.3; //ref for measurements, calculated later by ADC with internal ref
 volatile uint8_t updateScreenRequest = 1;//update at setup on first frame
 
 volatile uint16_t Discharge_current = 500;//mA
 volatile float Cutoff_voltage = 2.5;//V
-volatile float ADC_VOLTAGES_MEAN[2] = {0};
+
+volatile uint32_t ADC_VOLTAGE_ACCUM = 0;
+volatile uint32_t ADC_CURRENT_ACCUM = 0;
+volatile uint16_t ADC_READING_COUNTER = 0;
+volatile DischargeDisplayData_t DischargeDisplayData = {0};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+int _write(int le, char *ptr, int len);
 void DELAY_US(uint16_t TIME_US);
 void charAddPadding(char* buffer, uint8_t align,uint8_t size);
 void updateScreen();
 void formatCharToLCD(char* message, uint8_t place, uint8_t level, uint8_t Padding);
-
+uint16_t CurrentToVoltage(uint32_t Shunt_voltage);//voltage on sense resistor
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+void ITM_Init(void) {
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    ITM->LAR = 0xC5ACCE55;  // Unlock ITM
+    ITM->TCR = ITM_TCR_ITMENA_Msk | ITM_TCR_SWOENA_Msk |
+               ITM_TCR_SYNCENA_Msk | (1 << ITM_TCR_TraceBusID_Pos);
+    ITM->TER = 0x1; // Enable stimulus port 0
+}
 /* USER CODE END 0 */
 
 /**
@@ -102,7 +119,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+static uint32_t last_tick;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -111,7 +128,6 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -128,13 +144,14 @@ int main(void)
   MX_TIM3_Init();
   MX_ADC1_Init();
   MX_TIM2_Init();
+
+  ITM_Init();
   /* USER CODE BEGIN 2 */
 	if(HAL_ADCEx_Calibration_Start(&hadc1) !=HAL_OK)
 	{
 		HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
 		Error_Handler();
 	}
-
 	if(HAL_TIM_Base_Start_IT(&htim2)!=HAL_OK)//TIM2 for DELAY_US
 	{
 		HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
@@ -158,6 +175,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 	while (1)
 	{
+		ITM_SendChar('A');
+		HAL_Delay(400);
 		if(updateScreenRequest)//only perfrom LCD switch states on gpio change
 		{
 			updateScreen();
@@ -171,6 +190,7 @@ int main(void)
 		}
 		case  DISCHARGE:
 		{
+			//ONCE TO DO
 			if(STATE_MCU_CURRENT != STATE_MCU_PREVIOUS)
 			{
 				if(HAL_TIM_Base_Start_IT(&htim3)!=HAL_OK)//TIM3 for SAMPLING
@@ -189,12 +209,40 @@ int main(void)
 					Error_Handler();
 				}
 				STATE_MCU_PREVIOUS = STATE_MCU_CURRENT;
+				last_tick = uwTick;
+				break;
+			}
+
+			//PERIODIC UPDATE
+			if(uwTick - last_tick > 500)// 0.5s refresh rate
+			{
+				updateScreenRequest=1;
+				uint32_t local_temp_volt;
+				uint32_t local_temp_curr;
+				uint16_t local_temp_count;
+
+				__disable_irq();
+				local_temp_volt = ADC_VOLTAGE_ACCUM;
+				local_temp_curr = ADC_CURRENT_ACCUM;
+				local_temp_count = ADC_READING_COUNTER;
+
+				ADC_READING_COUNTER=0;
+				ADC_CURRENT_ACCUM=0;
+				ADC_VOLTAGE_ACCUM=0;
+				__enable_irq();
+
+
+
+				DischargeDisplayData.voltage = Vdda*local_temp_volt/local_temp_count/ADC_steps;//convert from ADC to Voltage
+				DischargeDisplayData.current_ma = Vdda*local_temp_curr/local_temp_count/R_load/ADC_steps*1000;//curr is voltage(XD)
+
+				last_tick = uwTick;
 			}
 			break;
 		}
 		case  FINISH:
 		{
-
+			//SHOW ALL THE VALUES
 			break;
 		}
 		case  PAUSED:
@@ -322,6 +370,23 @@ void updateScreen()
 	}
 	case  DISCHARGE:
 	{
+		if(STATE_MCU_CURRENT != STATE_MCU_PREVIOUS)
+		{
+			sprintf(LCD_buffer,"Starting");
+			formatCharToLCD(LCD_buffer,0,0,ALIGN_CENTER);
+
+			sprintf(LCD_buffer,"the discharge...");
+			formatCharToLCD(LCD_buffer,0,1,ALIGN_CENTER);
+		}
+		//Printing the reading values
+		uint8_t separator = 10*(DischargeDisplayData.voltage+0.05)-10*(int)(DischargeDisplayData.voltage);
+		sprintf(LCD_buffer,"%d.%d",(uint16_t)DischargeDisplayData.voltage,separator);
+		sprintf(LCD_buffer,"%d mA,   %d.%d V",(uint16_t)DischargeDisplayData.current_ma,(uint16_t)DischargeDisplayData.voltage,separator);
+		formatCharToLCD(LCD_buffer,0,0,ALIGN_LEFT);
+
+		sprintf(LCD_buffer,"%d mAh,   %d s",(uint16_t)DischargeDisplayData.capacity_mah,(uint16_t)DischargeDisplayData.elapsed_time_sec);
+		formatCharToLCD(LCD_buffer,0,1,ALIGN_LEFT);
+
 
 		break;
 	}
@@ -409,7 +474,6 @@ void charAddPadding(char* buffer, uint8_t align,uint8_t size)
 		return;
 	}
 }
-
 //INTERRUPT CALLBACKS
 
 //EXTI
@@ -466,30 +530,72 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc)
 {
 	uint32_t adc_sum[2] = {0};
+	static uint16_t Current_BATT;
 
 	for(uint16_t i = 0; i < (ADC_DMA_SIZE/2)-1; i=i+2)
 	{
 		adc_sum[0] += ADC_Values[i];//first channel
 		adc_sum[1] += ADC_Values[i+1];//second channel
 	}
+	adc_sum[0] = 4*adc_sum[0]/ADC_DMA_SIZE;
+	adc_sum[1] = 4*adc_sum[1]/ADC_DMA_SIZE;
 
-	ADC_VOLTAGES_MEAN[0] = 4.0*(float)adc_sum[0]/ADC_DMA_SIZE;
-	ADC_VOLTAGES_MEAN[1] = 4.0*(float)adc_sum[1]/(ADC_DMA_SIZE);
+	//ALSO PWM INTEGRATION
+
+
+
+	//CURRENT AND MAH CONVERSION
+	Current_BATT = 3300*adc_sum[1]/R_load/ADC_steps;//convert to mA
+	DischargeDisplayData.capacity_mah += Current_BATT*MAH_CONVERSION;
+
+	//defensive guard band
+	__disable_irq();
+	ADC_VOLTAGE_ACCUM += adc_sum[0];
+	ADC_CURRENT_ACCUM += adc_sum[1];
+	ADC_READING_COUNTER+=1;
+	__enable_irq();
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
 	uint32_t adc_sum[2] = {0};
+	static uint16_t Current_BATT;
 
 	for(uint16_t i = (ADC_DMA_SIZE/2); i < ADC_DMA_SIZE; i=i+2)
 	{
 		adc_sum[0] += ADC_Values[i];//first channel
 		adc_sum[1] += ADC_Values[i+1];//second channel
 	}
-	ADC_VOLTAGES_MEAN[0] = 4.0*(float)adc_sum[0]/ADC_DMA_SIZE;
-	ADC_VOLTAGES_MEAN[1] = 4.0*(float)adc_sum[1]/(ADC_DMA_SIZE);
+	//AVERAGES
+	adc_sum[0] = 4*adc_sum[0]/ADC_DMA_SIZE;
+	adc_sum[1] = 4*adc_sum[1]/ADC_DMA_SIZE;
+
+	//ALSO PWM INTEGRATION
+
+
+
+	//CURRENT AND MAH CONVERSION
+	Current_BATT = 3300*adc_sum[1]/R_load/ADC_steps;//convert to mA
+	DischargeDisplayData.capacity_mah += Current_BATT*MAH_CONVERSION;
+	DischargeDisplayData.elapsed_time_sec = uwTick/1000;
+
+	//defensive guard band
+	__disable_irq();
+	ADC_VOLTAGE_ACCUM += adc_sum[0];
+	ADC_CURRENT_ACCUM += adc_sum[1];
+	ADC_READING_COUNTER+=1;
+	__enable_irq();
 }
 
+int _write(int le, char *ptr, int len)
+    {
+    int DataIdx;
+    for(DataIdx = 0; DataIdx < len; DataIdx++)
+        {
+        ITM_SendChar(*ptr++);
+        }
+    return len;
+    }
 
 /* USER CODE END 4 */
 
