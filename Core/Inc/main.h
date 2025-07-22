@@ -94,12 +94,12 @@ typedef struct {
 #define Button_mode_Pin GPIO_PIN_1
 #define Button_mode_GPIO_Port GPIOB
 #define Button_mode_EXTI_IRQn EXTI1_IRQn
-#define Button_add_Pin GPIO_PIN_10
-#define Button_add_GPIO_Port GPIOB
-#define Button_add_EXTI_IRQn EXTI15_10_IRQn
-#define Button_sub_Pin GPIO_PIN_11
+#define Button_sub_Pin GPIO_PIN_10
 #define Button_sub_GPIO_Port GPIOB
 #define Button_sub_EXTI_IRQn EXTI15_10_IRQn
+#define Button_add_Pin GPIO_PIN_11
+#define Button_add_GPIO_Port GPIOB
+#define Button_add_EXTI_IRQn EXTI15_10_IRQn
 #define RS_Pin GPIO_PIN_9
 #define RS_GPIO_Port GPIOA
 #define RW_Pin GPIO_PIN_10

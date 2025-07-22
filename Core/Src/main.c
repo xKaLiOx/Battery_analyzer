@@ -41,6 +41,7 @@
 #define ALIGN_LEFT 1
 #define ALIGN_RIGHT 2
 #define ALIGN_CENTER 3
+#define BUTTON_DEBOUNCE_MS 30//30 ms for debouncing
 
 #define LCD_BUFFER_SIZE 32
 #define R_load 0.22 //load ohms
@@ -79,6 +80,7 @@ uint16_t ADC_Values[ADC_DMA_SIZE];//ping pong buffer
 
 volatile float Vdda = 3.3; //ref for measurements, calculated later by ADC with internal ref
 volatile uint8_t updateScreenRequest = 1;//update at setup on first frame
+volatile uint8_t button_activity = 0;
 
 volatile uint16_t Discharge_current = 500;//mA
 volatile float Cutoff_voltage = 2.5;//V
@@ -102,51 +104,42 @@ uint16_t CurrentToVoltage(uint32_t Shunt_voltage);//voltage on sense resistor
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void ITM_Init(void) {
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    ITM->LAR = 0xC5ACCE55;  // Unlock ITM
-    ITM->TCR = ITM_TCR_ITMENA_Msk | ITM_TCR_SWOENA_Msk |
-               ITM_TCR_SYNCENA_Msk | (1 << ITM_TCR_TraceBusID_Pos);
-    ITM->TER = 0x1; // Enable stimulus port 0
-}
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
+ * @brief  The application entry point.
+ * @retval int
+ */
 int main(void)
 {
 
-  /* USER CODE BEGIN 1 */
-static uint32_t last_tick;
-  /* USER CODE END 1 */
+	/* USER CODE BEGIN 1 */
+	static uint32_t last_tick;
+	/* USER CODE END 1 */
 
-  /* MCU Configuration--------------------------------------------------------*/
+	/* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+	HAL_Init();
 
-  /* USER CODE BEGIN Init */
-  /* USER CODE END Init */
+	/* USER CODE BEGIN Init */
+	/* USER CODE END Init */
 
-  /* Configure the system clock */
-  SystemClock_Config();
+	/* Configure the system clock */
+	SystemClock_Config();
 
-  /* USER CODE BEGIN SysInit */
+	/* USER CODE BEGIN SysInit */
 
-  /* USER CODE END SysInit */
+	/* USER CODE END SysInit */
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_TIM4_Init();
-  MX_TIM3_Init();
-  MX_ADC1_Init();
-  MX_TIM2_Init();
-
-  ITM_Init();
-  /* USER CODE BEGIN 2 */
+	/* Initialize all configured peripherals */
+	MX_GPIO_Init();
+	MX_DMA_Init();
+	MX_TIM4_Init();
+	MX_TIM3_Init();
+	MX_ADC1_Init();
+	MX_TIM2_Init();
+	/* USER CODE BEGIN 2 */
 	if(HAL_ADCEx_Calibration_Start(&hadc1) !=HAL_OK)
 	{
 		HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
@@ -169,14 +162,13 @@ static uint32_t last_tick;
 	/*
 	 * @brief Init in 4 bit LCD 16x2
 	 */
-  /* USER CODE END 2 */
+	LCD_Init();
+	/* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
+	/* Infinite loop */
+	/* USER CODE BEGIN WHILE */
 	while (1)
 	{
-		ITM_SendChar('A');
-		HAL_Delay(400);
 		if(updateScreenRequest)//only perfrom LCD switch states on gpio change
 		{
 			updateScreen();
@@ -257,53 +249,88 @@ static uint32_t last_tick;
 		}
 		}
 
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
+		if(button_activity)
+		{
+			if(STATE_MCU_CURRENT == SETUP)
+			{
+				if(HAL_GPIO_ReadPin(Button_mode_GPIO_Port, Button_mode_Pin) == GPIO_PIN_SET)
+				{
+					SETUP_CONFIGURATION = 	(SETUP_CONFIGURATION+1)%SETUP_PARAM_COUNT;
+				}
+				else if(HAL_GPIO_ReadPin(Button_add_GPIO_Port, Button_add_Pin) == GPIO_PIN_SET)
+				{
+					if(SETUP_CONFIGURATION == SETUP_PARAM_CUTOFF_VOLTAGE)
+					{
+						Cutoff_voltage += 0.1;// 100 mV step
+					}
+					else if(SETUP_CONFIGURATION == SETUP_PARAM_DISCHARGE_CURRENT)
+					{
+						Discharge_current+=10;// 10 mA step
+					}
+				}
+				else if(HAL_GPIO_ReadPin(Button_sub_GPIO_Port, Button_sub_Pin) == GPIO_PIN_SET)
+				{
+					if(SETUP_CONFIGURATION == SETUP_PARAM_CUTOFF_VOLTAGE)
+					{
+						Cutoff_voltage -= 0.1;// 100 mV step
+					}
+					else if(SETUP_CONFIGURATION == SETUP_PARAM_DISCHARGE_CURRENT)
+					{
+						Discharge_current-=10;// 10 mA step
+					}
+				}
+			updateScreenRequest = 1;
+			}
+			button_activity = 0;
+		}
 	}
-  /* USER CODE END 3 */
+
+	/* USER CODE END WHILE */
+
+	/* USER CODE BEGIN 3 */
+/* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
+ * @brief System Clock Configuration
+ * @retval None
+ */
 void SystemClock_Config(void)
 {
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+	RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+	RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+	RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/** Initializes the RCC Oscillators according to the specified parameters
+	 * in the RCC_OscInitTypeDef structure.
+	 */
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+	{
+		Error_Handler();
+	}
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSE;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+	/** Initializes the CPU, AHB and APB buses clocks
+	 */
+	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+			|RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSE;
+	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV2;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+	PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV2;
+	if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+	{
+		Error_Handler();
+	}
 }
 
 /* USER CODE BEGIN 4 */
@@ -316,7 +343,6 @@ void DELAY_US(uint16_t TIME_US)
 	{
 		while (TIM2->CNT >= old_timer_value);  // Wait for overflow
 	}
-
 	while (TIM2->CNT < target_time);  // Wait until target time is reached
 }
 void updateScreen()
@@ -343,16 +369,16 @@ void updateScreen()
 		switch(SETUP_CONFIGURATION)
 		{
 		case(SETUP_PARAM_DISCHARGE_CURRENT):
-					{
+						{
 			sprintf(LCD_buffer,"Current, mA");
 			formatCharToLCD(LCD_buffer,0,0,ALIGN_CENTER);
 
 			sprintf(LCD_buffer,"%d",Discharge_current);
 			formatCharToLCD(LCD_buffer,0,1,ALIGN_CENTER);
 			break;
-					}
+						}
 		case(SETUP_PARAM_CUTOFF_VOLTAGE):
-					{
+						{
 			sprintf(LCD_buffer,"Voltage, V");
 			formatCharToLCD(LCD_buffer,0,0,ALIGN_CENTER);
 
@@ -361,7 +387,7 @@ void updateScreen()
 			sprintf(LCD_buffer,"%d.%d",(int)Cutoff_voltage,separator);
 			formatCharToLCD(LCD_buffer,1,1,ALIGN_CENTER);
 			break;
-					}
+						}
 		default:
 			LCD_CLEAR();
 			break;
@@ -479,52 +505,17 @@ void charAddPadding(char* buffer, uint8_t align,uint8_t size)
 //EXTI
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	//test what button is pressed
-	//IMPLEMENT THE STARTING PROCESS
-	STATE_MCU_CURRENT = DISCHARGE;
-	STATE_MCU_PREVIOUS = SETUP;
-	if(STATE_MCU_CURRENT != SETUP)
+	static uint32_t last_button_time = 0;
+	if(uwTick-last_button_time > BUTTON_DEBOUNCE_MS)
 	{
-		return;
+		button_activity = 1;
+		last_button_time = uwTick;
 	}
-	updateScreenRequest = 1;
-	switch(GPIO_Pin)
-	{
-	case(Button_mode_Pin):
-			{
-		SETUP_CONFIGURATION = 	(SETUP_CONFIGURATION+1)%SETUP_PARAM_COUNT;
-		break;
-			}
-	case(Button_add_Pin):
-					{
-		if(SETUP_CONFIGURATION == SETUP_PARAM_CUTOFF_VOLTAGE)
-		{
-			Cutoff_voltage += 0.05;// 50 mV step
-		}
-		else if(SETUP_CONFIGURATION == SETUP_PARAM_DISCHARGE_CURRENT)
-		{
-			Discharge_current+=10;// 10 mA step
-		}
-		break;
-					}
-	case(Button_sub_Pin):
-			{
-		if(SETUP_CONFIGURATION == SETUP_PARAM_CUTOFF_VOLTAGE)
-		{
-			Cutoff_voltage -= 0.05;// 50 mV step
-		}
-		else if(SETUP_CONFIGURATION == SETUP_PARAM_DISCHARGE_CURRENT)
-		{
-			Discharge_current-=10;// 10 mA step
-		}
-		break;
-			}
-	default:
-	{
 
-		break;
-	}
-	}
+	//IMPLEMENT THE STARTING PROCESS
+	//	STATE_MCU_CURRENT = DISCHARGE;
+	//	STATE_MCU_PREVIOUS = SETUP;
+
 }
 
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc)
@@ -588,44 +579,44 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 }
 
 int _write(int le, char *ptr, int len)
-    {
-    int DataIdx;
-    for(DataIdx = 0; DataIdx < len; DataIdx++)
-        {
-        ITM_SendChar(*ptr++);
-        }
-    return len;
-    }
+{
+	int DataIdx;
+	for(DataIdx = 0; DataIdx < len; DataIdx++)
+	{
+		ITM_SendChar(*ptr++);
+	}
+	return len;
+}
 
 /* USER CODE END 4 */
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
 void Error_Handler(void)
 {
-  /* USER CODE BEGIN Error_Handler_Debug */
+	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	__disable_irq();
 	while (1)
 	{
 	}
-  /* USER CODE END Error_Handler_Debug */
+	/* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
 void assert_failed(uint8_t *file, uint32_t line)
 {
-  /* USER CODE BEGIN 6 */
+	/* USER CODE BEGIN 6 */
 	/* User can add his own implementation to report the file name and line number,
      ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
+	/* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
