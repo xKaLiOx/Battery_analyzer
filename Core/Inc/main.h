@@ -82,7 +82,7 @@ typedef struct {
     float voltage;
     float current_ma;
     float capacity_mah;
-    uint32_t elapsed_time_sec;
+    uint32_t start_time;
 } DischargeDisplayData_t;
 /* USER CODE END EFP */
 
@@ -91,6 +91,8 @@ typedef struct {
 #define USER_LED_GPIO_Port GPIOC
 #define CHARGING_STATE_Pin GPIO_PIN_14
 #define CHARGING_STATE_GPIO_Port GPIOC
+#define MOSFET_PWM_Pin GPIO_PIN_3
+#define MOSFET_PWM_GPIO_Port GPIOA
 #define Button_mode_Pin GPIO_PIN_1
 #define Button_mode_GPIO_Port GPIOB
 #define Button_mode_EXTI_IRQn EXTI1_IRQn
@@ -114,8 +116,6 @@ typedef struct {
 #define D6_GPIO_Port GPIOB
 #define D7_Pin GPIO_PIN_8
 #define D7_GPIO_Port GPIOB
-#define PWM_MOSFET_Pin GPIO_PIN_9
-#define PWM_MOSFET_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
