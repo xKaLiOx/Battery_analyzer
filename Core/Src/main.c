@@ -101,6 +101,7 @@ void DELAY_US(uint16_t TIME_US);
 void charAddPadding(char* buffer, uint8_t align,uint8_t size);
 void updateScreen();
 void formatCharToLCD(char* message, uint8_t place, uint8_t level, uint8_t Padding);
+void PWM_Control_loop(TIM_HandleTypeDef *htim);
 uint16_t CurrentToVoltage(uint32_t Shunt_voltage);//voltage on sense resistor
 /* USER CODE END PFP */
 
@@ -204,8 +205,9 @@ int main(void)
 				}
 				STATE_MCU_PREVIOUS = STATE_MCU_CURRENT;
 				DischargeDisplayData.start_time = uwTick;
+				HAL_GPIO_WritePin(CHARGING_STATE_GPIO_Port, CHARGING_STATE_Pin,GPIO_PIN_SET); // indication for charging
 				last_tick = uwTick;
-				break;
+ 				break;
 			}
 
 			//PERIODIC UPDATE
@@ -468,6 +470,11 @@ void updateScreen()
 	}
 	case  FINISH:
 	{
+		sprintf(LCD_buffer,"FINISHED");
+		formatCharToLCD(LCD_buffer,0,1,ALIGN_CENTER);
+
+		sprintf(LCD_buffer,"WHAT TO PRINT?");
+		formatCharToLCD(LCD_buffer,0,1,ALIGN_RIGHT);
 
 		break;
 	}
@@ -550,6 +557,14 @@ void charAddPadding(char* buffer, uint8_t align,uint8_t size)
 		return;
 	}
 }
+
+void PWM_Control_loop(TIM_HandleTypeDef *htim)
+{
+	static uint16_t x=0;
+	htim->Instance->CCR4 = x;
+	x = (x+1)%200;
+}
+
 //INTERRUPT CALLBACKS
 
 //EXTI
@@ -572,6 +587,8 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc)
 	uint32_t adc_sum[2] = {0};
 	static uint16_t Current_BATT;
 
+
+	//AVERAGING
 	for(uint16_t i = 0; i < (ADC_DMA_SIZE/2)-1; i=i+2)
 	{
 		adc_sum[0] += ADC_Values[i];//first channel
@@ -580,8 +597,8 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc)
 	adc_sum[0] = 4*adc_sum[0]/ADC_DMA_SIZE;
 	adc_sum[1] = 4*adc_sum[1]/ADC_DMA_SIZE;
 
-	//ALSO PWM INTEGRATION
-
+	//PWM CONTROL LOOP
+	PWM_Control_loop(&htim2);
 
 
 	//CURRENT AND MAH CONVERSION
@@ -612,12 +629,8 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 	adc_sum[0] = 4*adc_sum[0]/ADC_DMA_SIZE;
 	adc_sum[1] = 4*adc_sum[1]/ADC_DMA_SIZE;
 
-	//ALSO PWM INTEGRATION
-
-//	static int x=0;
-//	x = x++;
-//	TIM2->CCR4 = x;
-
+	//PWM CONTROL LOOP
+		PWM_Control_loop(&htim2);
 
 	//CURRENT AND MAH CONVERSION
 	Current_BATT = 3300*adc_sum[1]/R_load/ADC_steps;//convert to mA
