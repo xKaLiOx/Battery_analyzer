@@ -46,6 +46,7 @@
 
 #define LCD_BUFFER_SIZE 32
 #define R_load 0.22 //load ohms
+#define R_divider_multiplier 1/(50/270.0f) // 50k/270k voltage divider to calculate battery voltage
 #define Vrefint 1.2 //1.2V internal reference voltage
 #define ADC_steps 4096
 
@@ -207,8 +208,10 @@ int main(void)
 				DischargeDisplayData.start_time = uwTick;
 				HAL_GPIO_WritePin(CHARGING_STATE_GPIO_Port, CHARGING_STATE_Pin,GPIO_PIN_SET); // indication for charging
 				last_tick = uwTick;
- 				break;
+				break;
 			}
+
+
 
 			//PERIODIC UPDATE
 			if(uwTick - last_tick > 500)// 0.5s refresh rate
@@ -228,10 +231,20 @@ int main(void)
 				ADC_VOLTAGE_ACCUM=0;
 				__enable_irq();
 
-				DischargeDisplayData.voltage = Vdda*local_temp_volt/local_temp_count/ADC_steps;//convert from ADC to Voltage
+				DischargeDisplayData.voltage = Vdda*local_temp_volt/local_temp_count/ADC_steps*R_divider_multiplier;//convert from ADC to Voltage
 				DischargeDisplayData.current_ma = Vdda*local_temp_curr/local_temp_count/R_load/ADC_steps*1000;//curr is voltage(XD)
 
 				last_tick = uwTick;
+
+				if(HAL_GPIO_ReadPin(Button_add_GPIO_Port, Button_add_Pin)==GPIO_PIN_SET)
+				{
+					TIM2->CCR4 += 10;
+				}
+
+				if(HAL_GPIO_ReadPin(Button_sub_GPIO_Port, Button_sub_Pin)==GPIO_PIN_SET)
+				{
+					TIM2->CCR4 -= 10;
+				}
 			}
 			break;
 		}
@@ -273,13 +286,13 @@ int main(void)
 				else if(HAL_GPIO_ReadPin(Button_add_GPIO_Port, Button_add_Pin) == GPIO_PIN_SET)
 				{
 					if(SETUP_CONFIGURATION == SETUP_PARAM_CUTOFF_VOLTAGE)
-						{
-							Cutoff_voltage += 100;// 100 mV step
-						}
-						else if(SETUP_CONFIGURATION == SETUP_PARAM_DISCHARGE_CURRENT)
-						{
-							Discharge_current+=10;// 10 mA step
-						}
+					{
+						Cutoff_voltage += 100;// 100 mV step
+					}
+					else if(SETUP_CONFIGURATION == SETUP_PARAM_DISCHARGE_CURRENT)
+					{
+						Discharge_current+=10;// 10 mA step
+					}
 					while(HAL_GPIO_ReadPin(Button_add_GPIO_Port, Button_add_Pin) == GPIO_PIN_SET)
 					{
 						if(uwTick-last_button_time > BUTTON_LONG_PRESS)
@@ -301,13 +314,13 @@ int main(void)
 				else if(HAL_GPIO_ReadPin(Button_sub_GPIO_Port, Button_sub_Pin) == GPIO_PIN_SET)
 				{
 					if(SETUP_CONFIGURATION == SETUP_PARAM_CUTOFF_VOLTAGE)
-						{
-							Cutoff_voltage -= 100;// 100 mV step
-						}
-						else if(SETUP_CONFIGURATION == SETUP_PARAM_DISCHARGE_CURRENT)
-						{
-							Discharge_current-=10;// 10 mA step
-						}
+					{
+						Cutoff_voltage -= 100;// 100 mV step
+					}
+					else if(SETUP_CONFIGURATION == SETUP_PARAM_DISCHARGE_CURRENT)
+					{
+						Discharge_current-=10;// 10 mA step
+					}
 					while(HAL_GPIO_ReadPin(Button_sub_GPIO_Port, Button_sub_Pin) == GPIO_PIN_SET)
 					{
 						if(uwTick-last_button_time > BUTTON_LONG_PRESS)
@@ -417,16 +430,16 @@ void updateScreen()
 		switch(SETUP_CONFIGURATION)
 		{
 		case(SETUP_PARAM_DISCHARGE_CURRENT):
-								{
+									{
 			sprintf(LCD_buffer,"Current, mA");
 			formatCharToLCD(LCD_buffer,0,0,ALIGN_CENTER);
 
 			sprintf(LCD_buffer,"%d",Discharge_current);
 			formatCharToLCD(LCD_buffer,0,1,ALIGN_CENTER);
 			break;
-								}
+									}
 		case(SETUP_PARAM_CUTOFF_VOLTAGE):
-								{
+									{
 			sprintf(LCD_buffer,"Voltage, V");
 			formatCharToLCD(LCD_buffer,0,0,ALIGN_CENTER);
 
@@ -436,7 +449,7 @@ void updateScreen()
 			sprintf(LCD_buffer,"%u.%u",temp1,temp2);
 			formatCharToLCD(LCD_buffer,1,1,ALIGN_CENTER);
 			break;
-								}
+									}
 		default:
 			LCD_CLEAR();
 			break;
@@ -459,11 +472,11 @@ void updateScreen()
 		//Printing the reading values
 		uint8_t separator = 10*(DischargeDisplayData.voltage+0.05)-10*(int)(DischargeDisplayData.voltage);
 		sprintf(LCD_buffer,"%u.%u",(uint16_t)DischargeDisplayData.voltage,separator);
-		sprintf(LCD_buffer,"%u mA,   %u.%u V",(uint16_t)DischargeDisplayData.current_ma,(uint16_t)DischargeDisplayData.voltage,separator);
+		sprintf(LCD_buffer,"%u mA, %u.%u V",(uint16_t)DischargeDisplayData.current_ma,(uint16_t)DischargeDisplayData.voltage,separator);
 		formatCharToLCD(LCD_buffer,0,0,ALIGN_LEFT);
 
 		elapsed_time = (uwTick-DischargeDisplayData.start_time)/1000;
-		sprintf(LCD_buffer,"%u mAh,   %lu s",(uint16_t)DischargeDisplayData.capacity_mah,elapsed_time);
+		sprintf(LCD_buffer,"%lu mAh, %lu s",(uint32_t)DischargeDisplayData.capacity_mah,elapsed_time);
 		formatCharToLCD(LCD_buffer,0,1,ALIGN_LEFT);
 
 		break;
@@ -560,9 +573,7 @@ void charAddPadding(char* buffer, uint8_t align,uint8_t size)
 
 void PWM_Control_loop(TIM_HandleTypeDef *htim)
 {
-	static uint16_t x=0;
-	htim->Instance->CCR4 = x;
-	x = (x+1)%200;
+	//	htim->Instance->CCR4 = 20;//ARR 200
 }
 
 //INTERRUPT CALLBACKS
@@ -630,7 +641,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 	adc_sum[1] = 4*adc_sum[1]/ADC_DMA_SIZE;
 
 	//PWM CONTROL LOOP
-		PWM_Control_loop(&htim2);
+	PWM_Control_loop(&htim2);
 
 	//CURRENT AND MAH CONVERSION
 	Current_BATT = 3300*adc_sum[1]/R_load/ADC_steps;//convert to mA
