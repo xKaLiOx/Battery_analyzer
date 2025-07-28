@@ -1,9 +1,0 @@
-* C:\Users\Linas\Desktop\STM32_stuff\Projects_older_workspace\Battery_analyzer\PWM_RC_filter.asc
-V1 N001 0 PULSE(0 3.3 1m 1u 1u {duty} 25u)
-R1 Vg N001 220k
-R2 Vg 0 50k
-C1 Vg 0 1µ
-.tran 500m
-.param duty=2.5u
-.backanno
-.end

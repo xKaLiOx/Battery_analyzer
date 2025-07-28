@@ -91,6 +91,8 @@ typedef struct {
 #define USER_LED_GPIO_Port GPIOC
 #define CHARGING_STATE_Pin GPIO_PIN_14
 #define CHARGING_STATE_GPIO_Port GPIOC
+#define DISCHARGE_STOP_Pin GPIO_PIN_2
+#define DISCHARGE_STOP_GPIO_Port GPIOA
 #define MOSFET_PWM_Pin GPIO_PIN_3
 #define MOSFET_PWM_GPIO_Port GPIOA
 #define Button_mode_Pin GPIO_PIN_1
